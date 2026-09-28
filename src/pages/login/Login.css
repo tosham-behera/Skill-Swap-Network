@@ -92,3 +92,24 @@
   color: var(--color-primary);
   font-weight: 600;
 }
+
+/* API/validation error banner (added when wiring forms to the backend) */
+.auth-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #FECACA;
+  background: #FEF2F2;
+  color: #B91C1C;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Disabled state while a request is in flight */
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.auth-submit:disabled:hover {
+  background: var(--color-primary);
+}

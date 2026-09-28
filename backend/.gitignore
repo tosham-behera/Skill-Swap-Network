@@ -1,0 +1,14 @@
+# Environment variables (contains real credentials/secrets)
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS junk
+.DS_Store
