@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Check, LogOut, Plus, RefreshCw } from 'lucide-react';
+import { Check, LogOut, Plus, RefreshCw, Search } from 'lucide-react';
 import api, { getApiErrorMessage } from '../../api/client.js';
 import { useAuth } from '../../auth/useAuth.js';
 import '../landing/Landing.css';
@@ -18,6 +18,8 @@ export default function Dashboard() {
   const [mySkills, setMySkills] = useState({ teach: [], wanted: [] });
   const [matches, setMatches] = useState([]);
   const [requests, setRequests] = useState({ incoming: [], outgoing: [] });
+  const [exchanges, setExchanges] = useState([]);
+  const [completedExchanges, setCompletedExchanges] = useState([]);
 
   const [teachForm, setTeachForm] = useState(initialAddForm('teach'));
   const [wantedForm, setWantedForm] = useState(initialAddForm('wanted'));
@@ -26,13 +28,30 @@ export default function Dashboard() {
   const [notice, setNotice] = useState('');
   const [requestError, setRequestError] = useState('');
   const [respondingId, setRespondingId] = useState(null);
+  const [completingId, setCompletingId] = useState(null);
   const [loadingData, setLoadingData] = useState(true);
   const [dataError, setDataError] = useState('');
   const [loggingOut, setLoggingOut] = useState(false);
 
+  // Profile search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null); // null = not searched yet
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+
   const refreshRequests = useCallback(async () => {
     const res = await api.get('/swap-requests');
     setRequests({ incoming: res.data.incoming ?? [], outgoing: res.data.outgoing ?? [] });
+  }, []);
+
+  const refreshExchanges = useCallback(async () => {
+    const res = await api.get('/swap-requests/active');
+    setExchanges(res.data.exchanges ?? []);
+  }, []);
+
+  const refreshCompleted = useCallback(async () => {
+    const res = await api.get('/swap-requests/completed');
+    setCompletedExchanges(res.data.exchanges ?? []);
   }, []);
 
   const refreshMatches = useCallback(async () => {
@@ -52,7 +71,7 @@ export default function Dashboard() {
         if (cancelled) return;
         setCatalog(skillsRes.data.skills ?? []);
         setMySkills({ teach: myRes.data.teach ?? [], wanted: myRes.data.wanted ?? [] });
-        await Promise.all([refreshMatches(), refreshRequests()]);
+        await Promise.all([refreshMatches(), refreshRequests(), refreshExchanges(), refreshCompleted()]);
       } catch (err) {
         if (!cancelled) setDataError(getApiErrorMessage(err));
       } finally {
@@ -62,11 +81,43 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [refreshMatches, refreshRequests]);
+  }, [refreshMatches, refreshRequests, refreshExchanges, refreshCompleted]);
 
   function clearTransient() {
     setSectionError('');
     setNotice('');
+  }
+
+  async function handleSearch(e) {
+    e.preventDefault();
+    const query = searchQuery.trim();
+    if (!query || searching) return;
+    setSearchError('');
+    setSearching(true);
+    try {
+      const res = await api.get('/users/search', { params: { q: query } });
+      setSearchResults(res.data.users ?? []);
+    } catch (err) {
+      setSearchError(getApiErrorMessage(err));
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function handleSearchSwapRequest(profile, myTeachSkill, theirTeachSkill) {
+    clearTransient();
+    setRequestError('');
+    try {
+      await api.post('/swap-requests', {
+        recipientId: profile.id,
+        skillRequesterTeaches: myTeachSkill.id,
+        skillRecipientTeaches: theirTeachSkill.id,
+      });
+      setNotice(`Swap request sent to ${profile.fullName}.`);
+      await Promise.all([refreshRequests(), refreshMatches()]);
+    } catch (err) {
+      setRequestError(getApiErrorMessage(err));
+    }
   }
 
   async function handleAddSkill(type, form, setForm) {
@@ -112,11 +163,28 @@ export default function Dashboard() {
     try {
       await api.patch(`/swap-requests/${requestId}`, { status });
       setNotice(`Request ${status}.`);
-      await Promise.all([refreshRequests(), refreshMatches()]);
+      // An accepted request becomes an active exchange; declined ones disappear.
+      await Promise.all([refreshRequests(), refreshMatches(), refreshExchanges()]);
     } catch (err) {
       setRequestError(getApiErrorMessage(err));
     } finally {
       setRespondingId(null);
+    }
+  }
+
+  async function handleComplete(exchangeId) {
+    clearTransient();
+    setRequestError('');
+    setCompletingId(exchangeId);
+    try {
+      await api.patch(`/swap-requests/${exchangeId}/complete`);
+      setNotice('Exchange marked as completed.');
+      // Completing removes it from Active and adds it to Completed.
+      await Promise.all([refreshRequests(), refreshMatches(), refreshExchanges(), refreshCompleted()]);
+    } catch (err) {
+      setRequestError(getApiErrorMessage(err));
+    } finally {
+      setCompletingId(null);
     }
   }
 
@@ -267,6 +335,91 @@ export default function Dashboard() {
             </form>
           </section>
 
+          {/* PROFILE SEARCH */}
+          <section className="dash-card dash-card-wide">
+            <div className="dash-card-head">
+              <h2 className="dash-card-title">Find students by name or skill</h2>
+            </div>
+
+            <form
+              className="dash-add-row dash-search-row"
+              onSubmit={handleSearch}
+            >
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name or skill — e.g. Maria, React, Python…"
+                aria-label="Search profiles by name or skill"
+                maxLength={80}
+              />
+              <button type="submit" className="btn-solid btn-small" disabled={searching} aria-busy={searching}>
+                <Search size={14} strokeWidth={2.5} />
+                {searching ? 'Searching…' : 'Search'}
+              </button>
+            </form>
+
+            {searchError && (
+              <p className="dash-muted dash-search-error" role="alert">{searchError}</p>
+            )}
+
+            {searching && (
+              <p className="dash-muted">Searching profiles…</p>
+            )}
+
+            {!searching && searchResults === null && (
+              <p className="dash-muted">
+                Type a student's name or a skill to discover profiles.
+              </p>
+            )}
+
+            {!searching && Array.isArray(searchResults) && searchResults.length === 0 && (
+              <p className="dash-muted">
+                No profiles matched “{searchQuery.trim()}”. Try a different name or skill.
+              </p>
+            )}
+
+            {!searching && searchResults && searchResults.length > 0 && (
+              <ul className="search-results">
+                {searchResults.map((profile) => (
+                  <li key={profile.id} className="match-item">
+                    <div className="match-item-head">
+                      <span className="match-avatar">{getInitials(profile.fullName)}</span>
+                      <div>
+                        <p className="match-item-name">{profile.fullName}</p>
+                        <p className="match-item-sub">{profile.email}</p>
+                      </div>
+                    </div>
+                    <div className="search-skills">
+                      <div className="search-skills-col">
+                        <span className="pair-label">Teaches</span>
+                        <ul className="skill-chip-list">
+                          {profile.teachSkills.map((s) => (
+                            <li key={`t-${s.id}`} className="skill-chip skill-chip-teach">{s.name}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="search-skills-col">
+                        <span className="pair-label">Wants to learn</span>
+                        <ul className="skill-chip-list">
+                          {profile.wantedSkills.map((s) => (
+                            <li key={`w-${s.id}`} className="skill-chip skill-chip-wanted">{s.name}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                    <SearchResultActions
+                      profile={profile}
+                      onSend={handleSearchSwapRequest}
+                      myTeachSkills={mySkills.teach}
+                      myWantedSkills={mySkills.wanted}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           {/* MATCHES */}
           <section className="dash-card dash-card-wide">
             <div className="dash-card-head">
@@ -324,6 +477,96 @@ export default function Dashboard() {
                         </li>
                       ))}
                     </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* ACTIVE EXCHANGES */}
+          <section className="dash-card dash-card-wide">
+            <div className="dash-card-head">
+              <h2 className="dash-card-title">Active exchanges</h2>
+              <button
+                type="button"
+                className="btn-text"
+                onClick={() => {
+                  clearTransient();
+                  refreshExchanges().catch((err) => setRequestError(getApiErrorMessage(err)));
+                }}
+              >
+                <RefreshCw size={13} strokeWidth={2} />
+                Refresh
+              </button>
+            </div>
+
+            {loadingData ? (
+              <p className="dash-muted">Loading…</p>
+            ) : exchanges.length === 0 ? (
+              <p className="dash-muted">
+                No active exchanges yet. When someone accepts your swap request (or you accept
+                theirs), the exchange shows up here.
+              </p>
+            ) : (
+              <ul className="request-list">
+                {exchanges.map((x) => (
+                  <li key={x.id} className="request-item">
+                    <p className="request-line">
+                      Exchanging with <strong>{x.otherUser.fullName}</strong> — you learn{' '}
+                      <span className="pill pill-wanted">{x.youLearn.name}</span>, you teach{' '}
+                      <span className="pill pill-teach">{x.youTeach.name}</span>
+                    </p>
+                    <div className="request-actions">
+                      <button
+                        type="button"
+                        className="btn-solid btn-small"
+                        disabled={completingId === x.id}
+                        onClick={() => handleComplete(x.id)}
+                      >
+                        <Check size={13} strokeWidth={2.5} />
+                        Mark completed
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* COMPLETED EXCHANGES */}
+          <section className="dash-card dash-card-wide">
+            <div className="dash-card-head">
+              <h2 className="dash-card-title">Completed exchanges</h2>
+              <button
+                type="button"
+                className="btn-text"
+                onClick={() => {
+                  clearTransient();
+                  refreshCompleted().catch((err) => setRequestError(getApiErrorMessage(err)));
+                }}
+              >
+                <RefreshCw size={13} strokeWidth={2} />
+                Refresh
+              </button>
+            </div>
+
+            {loadingData ? (
+              <p className="dash-muted">Loading…</p>
+            ) : completedExchanges.length === 0 ? (
+              <p className="dash-muted">
+                No completed exchanges yet. Mark an active exchange as completed once the skill
+                swap is done.
+              </p>
+            ) : (
+              <ul className="request-list">
+                {completedExchanges.map((x) => (
+                  <li key={x.id} className="request-item">
+                    <p className="request-line">
+                      Completed with <strong>{x.otherUser.fullName}</strong> — you learned{' '}
+                      <span className="pill pill-wanted">{x.youLearn.name}</span>, you taught{' '}
+                      <span className="pill pill-teach">{x.youTeach.name}</span>
+                    </p>
+                    <span className={`status-badge status-${x.status}`}>{x.status}</span>
                   </li>
                 ))}
               </ul>
@@ -428,4 +671,48 @@ function getInitials(name) {
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join('');
+}
+
+// Computes the exact two-way exchanges possible with a searched profile
+// (same semantics as the matches card) and renders a Request Swap button
+// per pair. Shows a hint when no complementary skills exist yet.
+function SearchResultActions({ profile, onSend, myTeachSkills, myWantedSkills }) {
+  const pairs = [];
+  for (const iTeach of myTeachSkills) {
+    if (!profile.wantedSkills.some((s) => s.id === iTeach.id)) continue;
+    for (const theyTeach of profile.teachSkills) {
+      if (myWantedSkills.some((s) => s.id === theyTeach.id)) {
+        pairs.push({ youTeach: iTeach, youLearn: theyTeach });
+      }
+    }
+  }
+
+  if (pairs.length === 0) {
+    return <p className="dash-muted">No exact two-way exchange with your current skills yet.</p>;
+  }
+
+  return (
+    <ul className="pair-list">
+      {pairs.map((p) => (
+        <li key={`${p.youLearn.id}-${p.youTeach.id}`} className="pair-row">
+          <span className="pair-col">
+            <span className="pair-label">You learn</span>
+            <span className="pair-skill">{p.youLearn.name}</span>
+          </span>
+          <span className="pair-arrow">&#8596;</span>
+          <span className="pair-col pair-col-right">
+            <span className="pair-label">You teach</span>
+            <span className="pair-skill">{p.youTeach.name}</span>
+          </span>
+          <button
+            type="button"
+            className="btn-solid btn-small"
+            onClick={() => onSend(profile, p.youTeach, p.youLearn)}
+          >
+            Request swap
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
 }

@@ -65,14 +65,15 @@ CREATE TABLE IF NOT EXISTS user_wanted_skills (
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
 
--- Swap requests between two users (pending -> accepted | declined)
+-- Swap requests between two users
+-- (pending -> accepted | declined; accepted -> completed)
 CREATE TABLE IF NOT EXISTS swap_requests (
   id                        INT UNSIGNED  NOT NULL AUTO_INCREMENT,
   requester_id              INT UNSIGNED  NOT NULL,
   recipient_id              INT UNSIGNED  NOT NULL,
   skill_requester_teaches   INT UNSIGNED  NOT NULL,
   skill_recipient_teaches   INT UNSIGNED  NOT NULL,
-  status                    ENUM('pending', 'accepted', 'declined') NOT NULL DEFAULT 'pending',
+  status                    ENUM('pending', 'accepted', 'declined', 'completed') NOT NULL DEFAULT 'pending',
   created_at                TIMESTAMP(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   updated_at                TIMESTAMP(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
   PRIMARY KEY (id),

@@ -4,8 +4,8 @@ function toPublicSwapRequest(row) {
   return {
     id: row.id,
     status: row.status,
-    requester: { id: row.requester_id, fullName: row.requester_name },
-    recipient: { id: row.recipient_id, fullName: row.recipient_name },
+    requester: { id: row.requester_id, fullName: row.requester_name, email: row.requester_email },
+    recipient: { id: row.recipient_id, fullName: row.recipient_name, email: row.recipient_email },
     skillRequesterTeaches: { id: row.skill_requester_teaches, name: row.skill_requester_teaches_name },
     skillRecipientTeaches: { id: row.skill_recipient_teaches, name: row.skill_recipient_teaches_name },
     createdAt: row.created_at,
@@ -15,8 +15,8 @@ function toPublicSwapRequest(row) {
 
 const REQUEST_SELECT = `
   SELECT sr.id, sr.status, sr.created_at, sr.updated_at,
-         sr.requester_id, ru.full_name AS requester_name,
-         sr.recipient_id, ru2.full_name AS recipient_name,
+         sr.requester_id, ru.full_name AS requester_name, ru.email AS requester_email,
+         sr.recipient_id, ru2.full_name AS recipient_name, ru2.email AS recipient_email,
          sr.skill_requester_teaches, s1.name AS skill_requester_teaches_name,
          sr.skill_recipient_teaches, s2.name AS skill_recipient_teaches_name
     FROM swap_requests sr
@@ -64,7 +64,7 @@ export async function getSwapRequestsForUser(userId) {
     `${REQUEST_SELECT}
       WHERE sr.requester_id = ? OR sr.recipient_id = ?
       ORDER BY
-        FIELD(sr.status, 'pending', 'accepted', 'declined'),
+        FIELD(sr.status, 'pending', 'accepted', 'declined', 'completed'),
         sr.updated_at DESC`,
     [userId, userId],
   );
@@ -73,6 +73,58 @@ export async function getSwapRequestsForUser(userId) {
     incoming: requests.filter((r) => r.recipient.id === userId),
     outgoing: requests.filter((r) => r.requester.id === userId),
   };
+}
+
+// ---------------------------------------------------------------
+// Active exchanges: accepted swap requests, from MY perspective.
+// Both participants see the same underlying row; only the view
+// changes (who "the other student" is, which skill I learn vs teach).
+// ---------------------------------------------------------------
+function toPublicExchange(row, userId) {
+  const iAmRequester = row.requester_id === userId;
+  return {
+    id: row.id,
+    status: row.status,
+    otherUser: {
+      id: iAmRequester ? row.recipient_id : row.requester_id,
+      fullName: iAmRequester ? row.recipient_name : row.requester_name,
+      email: iAmRequester ? row.recipient_email : row.requester_email,
+    },
+    // The requester teaches skill_requester_teaches and the recipient
+    // teaches skill_recipient_teaches; flip both when viewing as recipient.
+    youLearn: iAmRequester
+      ? { id: row.skill_recipient_teaches, name: row.skill_recipient_teaches_name }
+      : { id: row.skill_requester_teaches, name: row.skill_requester_teaches_name },
+    youTeach: iAmRequester
+      ? { id: row.skill_requester_teaches, name: row.skill_requester_teaches_name }
+      : { id: row.skill_recipient_teaches, name: row.skill_recipient_teaches_name },
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function getActiveExchangesForUser(userId) {
+  const [rows] = await getPool().execute(
+    `${REQUEST_SELECT}
+      WHERE sr.status = 'accepted'
+        AND (sr.requester_id = ? OR sr.recipient_id = ?)
+      ORDER BY sr.updated_at DESC`,
+    [userId, userId],
+  );
+  return rows.map((row) => toPublicExchange(row, userId));
+}
+
+// Completed = an accepted exchange that either participant marked done.
+// Both participants see the same underlying row.
+export async function getCompletedExchangesForUser(userId) {
+  const [rows] = await getPool().execute(
+    `${REQUEST_SELECT}
+      WHERE sr.status = 'completed'
+        AND (sr.requester_id = ? OR sr.recipient_id = ?)
+      ORDER BY sr.updated_at DESC`,
+    [userId, userId],
+  );
+  return rows.map((row) => toPublicExchange(row, userId));
 }
 
 export async function updateSwapRequestStatus(id, status) {

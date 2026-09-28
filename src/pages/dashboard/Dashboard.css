@@ -317,6 +317,46 @@
   white-space: nowrap;
 }
 
+/* PROFILE SEARCH */
+.dash-search-row {
+  margin-bottom: var(--space-3);
+}
+
+.dash-search-row input {
+  flex: 1;
+}
+
+.dash-search-error {
+  color: #B91C1C;
+  margin-bottom: var(--space-2);
+}
+
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.search-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.search-skills-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.search-skills-col .skill-chip-list {
+  margin-bottom: 0;
+}
+
 /* REQUESTS */
 .requests-grid {
   display: grid;
@@ -401,6 +441,11 @@
 .status-declined {
   background: #F3F4F6;
   color: var(--color-muted);
+}
+
+.status-completed {
+  background: #EDE9FE;
+  color: #6D28D9;
 }
 
 /* RESPONSIVE */

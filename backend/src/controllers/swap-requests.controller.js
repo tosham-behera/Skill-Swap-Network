@@ -2,6 +2,8 @@ import {
   createSwapRequest,
   findOpenSwapBetween,
   findSwapRequestById,
+  getActiveExchangesForUser,
+  getCompletedExchangesForUser,
   getSwapRequestsForUser,
   updateSwapRequestStatus,
 } from '../models/SwapRequest.js';
@@ -14,6 +16,63 @@ export async function listSwapRequests(req, res, next) {
   try {
     const { incoming, outgoing } = await getSwapRequestsForUser(req.user.id);
     return res.status(200).json({ incoming, outgoing });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/swap-requests/active - my accepted exchanges (either role)
+export async function listActiveExchanges(req, res, next) {
+  try {
+    const exchanges = await getActiveExchangesForUser(req.user.id);
+    return res.status(200).json({ exchanges });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/swap-requests/completed - my completed exchanges (either role)
+export async function listCompletedExchanges(req, res, next) {
+  try {
+    const exchanges = await getCompletedExchangesForUser(req.user.id);
+    return res.status(200).json({ exchanges });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PATCH /api/swap-requests/:id/complete - mark an active exchange as done.
+// Either participant may complete it; the row moves out of Active Exchanges
+// and into Completed Exchanges for both users.
+export async function completeExchangeHandler(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw httpError(400, 'VALIDATION_ERROR', 'Invalid swap request id.');
+    }
+
+    const swapRequest = await findSwapRequestById(id);
+    if (!swapRequest) {
+      throw httpError(404, 'SWAP_REQUEST_NOT_FOUND', 'Swap request not found.');
+    }
+    const isParticipant =
+      swapRequest.requester.id === req.user.id || swapRequest.recipient.id === req.user.id;
+    if (!isParticipant) {
+      // 404 (not 403) avoids revealing other users' request ids.
+      throw httpError(404, 'SWAP_REQUEST_NOT_FOUND', 'Swap request not found.');
+    }
+    if (swapRequest.status !== 'accepted') {
+      const why =
+        swapRequest.status === 'pending'
+          ? 'This request has not been accepted yet.'
+        : swapRequest.status === 'completed'
+          ? 'This exchange was already completed.'
+          : 'This request was declined; only accepted exchanges can be completed.';
+      throw httpError(409, 'EXCHANGE_NOT_ACTIVE', why);
+    }
+
+    const updated = await updateSwapRequestStatus(id, 'completed');
+    return res.status(200).json({ exchange: updated });
   } catch (err) {
     next(err);
   }
